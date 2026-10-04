@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Currency Converter",
+    "slug": "currency-converter",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.currencyconverter.mobile"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#101f2d",
+        "foregroundImage": "./assets/icon.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.currencyconverter.mobile"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "backgroundColor": "#101f2d"
+  }
+}
