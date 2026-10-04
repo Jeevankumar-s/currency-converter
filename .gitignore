@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+# Expo
+.expo/
+dist/
+web-build/
+# Native generated projects
+/android
+/ios
+# Credentials and local environment
+.env*.local
+*.jks
+*.keystore
+*.p8
+*.p12
+*.pem
+*.key
+# Other
+.DS_Store
+*.tsbuildinfo
