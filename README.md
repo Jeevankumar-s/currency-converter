@@ -2,7 +2,7 @@
 
 A standard **React Native Community CLI** app using React Native 0.86.3 and TypeScript. No Expo, EAS, or Expo sign-in is used.
 
-Converts **USD → INR** and **EUR → INR** with a navy-and-mint UI, currency tabs, quick amounts, Indian number formatting, dated reference rates, manual refresh, and saved-rate fallback when offline.
+Converts **USD / EUR / GBP → INR** with a navy-and-mint UI, currency tabs, quick amounts, Indian number formatting, dated reference rates, manual refresh, and saved-rate fallback when offline.
 
 ## Get your APK from GitHub
 
@@ -73,3 +73,9 @@ npm run bundle:android
 Rates come from the public [Frankfurter v2 API](https://frankfurter.dev/) without an API key. Both pairs load at launch and on refresh. Requests time out after 12 seconds. Successful rates are saved locally; if refresh fails, saved rates are shown with their date. Amounts from zero to 1 billion with up to two decimal places are accepted.
 
 These are daily reference estimates. Bank rates and fees may differ. Internet access is required for fresh rates.
+
+## Addition and your PayPal rates
+
+Enter amounts such as `7 + 3 + 2.50`, or use **Add amount** beside the numeric keyboard. The app shows the sum and converts it using the selected currency. Addition uses integer cents to avoid decimal accumulation errors. Each amount supports two decimal places; the total cannot exceed 1 billion.
+
+**My PayPal rate** is the default mode. USD starts at ₹92.50 and GBP at ₹122, as provided by the user. EUR has no manual preset: enter its rate from PayPal and tap **Save rate**, or use **Market rate**. Manual rates and the selected mode are saved locally. They are estimates entered by you, not automatically fetched or verified PayPal quotes. Check your PayPal currency calculator before a transaction; PayPal's transaction rates and fees may vary. Market mode continues to fetch dated Frankfurter reference rates for all three currencies.
