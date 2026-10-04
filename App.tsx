@@ -21,18 +21,36 @@ import {
   parseAmount,
   validateRate,
 } from './src/currency';
+import {
+  defaultManualRates,
+  ManualRates,
+  RateMode,
+  parseExchangeRate,
+  restorePreferences,
+} from './src/preferences';
 
-const currencies: Currency[] = ['USD', 'EUR'];
+const currencies: Currency[] = ['USD', 'EUR', 'GBP'];
 const details = {
   USD: { symbol: '$', flag: '🇺🇸', name: 'US Dollar' },
   EUR: { symbol: '€', flag: '🇪🇺', name: 'Euro' },
+  GBP: { symbol: '£', flag: '🇬🇧', name: 'British Pound' },
 };
 const cacheKey = 'currency-converter-rates-v1';
+const preferencesKey = 'currency-converter-preferences-v2';
 
 export default function App() {
   const [currency, setCurrency] = useState<Currency>('USD');
   const [amount, setAmount] = useState('100');
+  const amountInput = useRef<TextInput>(null);
+  const [cursor, setCursor] = useState<{ start: number; end: number }>();
   const [rates, setRates] = useState<Partial<Record<Currency, Rate>>>({});
+  const [rateMode, setRateMode] = useState<RateMode>('paypal');
+  const [manualRates, setManualRates] =
+    useState<ManualRates>(defaultManualRates);
+  const [rateDraft, setRateDraft] = useState('92.5');
+  const [rateMessage, setRateMessage] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [cached, setCached] = useState(false);
@@ -49,11 +67,11 @@ export default function App() {
     setError('');
     const timeout = setTimeout(() => abort.abort(), 12000);
     try {
-      const [usd, eur] = await Promise.all(
+      const [usd, eur, gbp] = await Promise.all(
         currencies.map(base => fetchRate(base, abort.signal)),
       );
       if (!mounted.current || request !== sequence.current) return;
-      const next = { USD: usd, EUR: eur };
+      const next = { USD: usd, EUR: eur, GBP: gbp };
       setRates(next);
       setCached(false);
       await AsyncStorage.setItem(cacheKey, JSON.stringify(next)).catch(
@@ -79,16 +97,36 @@ export default function App() {
         const stored = await AsyncStorage.getItem(cacheKey);
         if (stored && mounted.current) {
           const data = JSON.parse(stored);
-          setRates({
-            USD: validateRate([data.USD], 'USD'),
-            EUR: validateRate([data.EUR], 'EUR'),
-          });
+          const saved: Partial<Record<Currency, Rate>> = {};
+          for (const code of currencies) {
+            try {
+              saved[code] = validateRate([data[code]], code);
+            } catch {
+              /* Skip invalid or missing pair. */
+            }
+          }
+          setRates(saved);
           setCached(true);
         }
       } catch {
         /* Ignore invalid or inaccessible cache; fetch fresh rates. */
       }
-      if (mounted.current) void refresh();
+      try {
+        const stored = await AsyncStorage.getItem(preferencesKey);
+        const preferences = restorePreferences(
+          stored ? JSON.parse(stored) : null,
+        );
+        if (mounted.current) {
+          setManualRates(preferences.rates);
+          setRateMode(preferences.mode);
+        }
+      } catch {
+        /* Keep user-provided defaults if preferences are unavailable. */
+      }
+      if (mounted.current) {
+        setReady(true);
+        void refresh();
+      }
     })();
     return () => {
       mounted.current = false;
@@ -96,11 +134,65 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    setRateDraft(
+      manualRates[currency] ? String(manualRates[currency]!.rate) : '',
+    );
+    setRateMessage('');
+  }, [currency, manualRates]);
+
+  async function changeMode(mode: RateMode) {
+    setSaving(true);
+    setRateMode(mode);
+    setRateMessage('');
+    try {
+      await AsyncStorage.setItem(
+        preferencesKey,
+        JSON.stringify({ mode, rates: manualRates }),
+      );
+    } catch {
+      setRateMessage('Mode changed, but could not save it for next time.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveManualRate() {
+    const value = parseExchangeRate(rateDraft);
+    if (value === null) {
+      setRateMessage('Enter a rate above zero with up to 6 decimal places.');
+      return;
+    }
+    setSaving(true);
+    const next = {
+      ...manualRates,
+      [currency]: { rate: value, updatedAt: new Date().toISOString() },
+    };
+    setManualRates(next);
+    try {
+      await AsyncStorage.setItem(
+        preferencesKey,
+        JSON.stringify({ mode: rateMode, rates: next }),
+      );
+      setRateMessage(`${currency} rate saved.`);
+    } catch {
+      setRateMessage(
+        'Rate updated for now, but could not save it for next time.',
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const rate = rates[currency];
+  const effectiveRate =
+    rateMode === 'paypal' ? manualRates[currency]?.rate : rate?.rate;
   const number = parseAmount(amount);
   const invalid = number === null;
   const result =
-    rate && number !== null ? formatINR(number * rate.rate) : '₹ —';
+    effectiveRate && number !== null
+      ? formatINR(number * effectiveRate)
+      : '₹ —';
   const date = rate
     ? new Date(`${rate.date}T12:00:00Z`).toLocaleDateString('en-IN', {
         day: 'numeric',
@@ -140,13 +232,13 @@ export default function App() {
               Make sense{'\n'}of your money<Text style={s.mint}>.</Text>
             </Text>
             <Text style={s.subtitle}>
-              Dollars or euros. See what they're worth in rupees, in an instant.
+              Add your amounts. Convert dollars, euros or pounds to rupees.
             </Text>
 
             <View style={s.card}>
               <View style={s.cardHeading}>
                 <Text style={s.section}>CONVERT TO RUPEES</Text>
-                <Text style={s.small}>USD / EUR → INR</Text>
+                <Text style={s.small}>USD / EUR / GBP → INR</Text>
               </View>
               <View style={s.tabs}>
                 {currencies.map(code => (
@@ -164,34 +256,143 @@ export default function App() {
                     >
                       {code}
                     </Text>
-                    <Text
-                      style={[s.tabName, currency === code && s.selectedText]}
-                    >
-                      {details[code].name}
+                  </Pressable>
+                ))}
+              </View>
+              <View style={s.modeRow}>
+                {(['paypal', 'market'] as RateMode[]).map(mode => (
+                  <Pressable
+                    key={mode}
+                    accessibilityRole="button"
+                    accessibilityState={{
+                      selected: rateMode === mode,
+                      disabled: !ready || saving,
+                    }}
+                    disabled={!ready || saving}
+                    onPress={() => changeMode(mode)}
+                    style={[s.modeButton, rateMode === mode && s.modeSelected]}
+                  >
+                    <Text style={s.modeText}>
+                      {mode === 'paypal' ? 'My PayPal rate' : 'Market rate'}
                     </Text>
                   </Pressable>
                 ))}
               </View>
-              <Text style={s.label}>You enter</Text>
+              {rateMode === 'paypal' && (
+                <View style={s.rateEditor}>
+                  <Text style={s.label}>
+                    INR for 1 {currency} · entered by you
+                  </Text>
+                  <View style={s.editorRow}>
+                    <Text style={s.inputSymbol}>₹</Text>
+                    <TextInput
+                      accessibilityLabel={`PayPal rate in INR for one ${currency}`}
+                      value={rateDraft}
+                      onChangeText={setRateDraft}
+                      keyboardType="decimal-pad"
+                      placeholder="Enter rate"
+                      placeholderTextColor="#87939b"
+                      maxLength={14}
+                      style={s.rateInput}
+                      editable={ready && !saving}
+                    />
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: !ready || saving }}
+                      disabled={!ready || saving}
+                      onPress={saveManualRate}
+                      style={s.refresh}
+                    >
+                      <Text style={s.refreshText}>
+                        {saving ? 'Saving…' : 'Save rate'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                  <Text style={s.helper}>
+                    Copy the rate shown in your PayPal currency calculator. This
+                    is a manual estimate, not a live PayPal quote.
+                  </Text>
+                  {!!rateMessage && (
+                    <Text accessibilityLiveRegion="polite" style={s.validation}>
+                      {rateMessage}
+                    </Text>
+                  )}
+                </View>
+              )}
+              <Text style={s.label}>Amount or addition</Text>
               <View style={[s.inputRow, invalid && s.invalid]}>
                 <Text style={s.inputSymbol}>{details[currency].symbol}</Text>
                 <TextInput
+                  ref={amountInput}
                   accessibilityLabel={`Amount in ${currency}`}
                   value={amount}
-                  onChangeText={setAmount}
+                  selection={cursor}
+                  onSelectionChange={event => {
+                    if (
+                      cursor &&
+                      event.nativeEvent.selection.start !== cursor.start
+                    )
+                      setCursor(undefined);
+                  }}
+                  onChangeText={value => {
+                    setAmount(value);
+                    setCursor(undefined);
+                  }}
                   keyboardType="decimal-pad"
-                  maxLength={14}
-                  placeholder="0.00"
+                  maxLength={120}
+                  placeholder="7 + 3 + 2.50"
                   placeholderTextColor="#87939b"
-                  style={s.input}
-                  selectTextOnFocus
+                  style={[s.input, amount.includes('+') && s.expressionInput]}
                 />
                 <Text style={s.inputCode}>{currency}</Text>
               </View>
               {invalid && (
                 <Text accessibilityRole="alert" style={s.validation}>
-                  Enter a positive amount or zero, with up to 2 decimal places
-                  (max 1 billion).
+                  Enter an amount or finish your addition, e.g. 7 + 3.50. Up to
+                  2 decimal places per amount; total max 1 billion.
+                </Text>
+              )}
+              <View style={s.additionRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Add another amount"
+                  accessibilityState={{
+                    disabled: invalid || amount.length > 110,
+                  }}
+                  disabled={invalid || amount.length > 110}
+                  onPress={() => {
+                    const next = `${amount} + `;
+                    setAmount(next);
+                    setCursor({ start: next.length, end: next.length });
+                    amountInput.current?.focus();
+                  }}
+                  style={[
+                    s.addButton,
+                    (invalid || amount.length > 110) && s.disabled,
+                  ]}
+                >
+                  <Text style={s.addText}>＋ Add amount</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear amount"
+                  onPress={() => {
+                    setAmount('');
+                    setCursor(undefined);
+                    amountInput.current?.focus();
+                  }}
+                  style={s.clearButton}
+                >
+                  <Text style={s.clearText}>Clear</Text>
+                </Pressable>
+              </View>
+              {number !== null && amount.includes('+') && (
+                <Text style={s.total}>
+                  Total: {details[currency].symbol}
+                  {number.toLocaleString('en-IN', {
+                    maximumFractionDigits: 2,
+                  })}{' '}
+                  {currency}
                 </Text>
               )}
               <View style={s.quickRow}>
@@ -200,7 +401,10 @@ export default function App() {
                     key={value}
                     accessibilityRole="button"
                     accessibilityLabel={`Set amount to ${value} ${currency}`}
-                    onPress={() => setAmount(value)}
+                    onPress={() => {
+                      setAmount(value);
+                      setCursor(undefined);
+                    }}
                     style={[s.quick, amount === value && s.quickActive]}
                   >
                     <Text style={s.quickText}>
@@ -234,41 +438,54 @@ export default function App() {
                 <View style={s.ratePill}>
                   <View style={s.dot} />
                   <Text style={s.rateText}>
-                    {rate
-                      ? `1 ${currency} = ${formatINR(rate.rate)}`
+                    {effectiveRate
+                      ? `1 ${currency} = ${formatINR(effectiveRate)}`
+                      : rateMode === 'paypal'
+                      ? `Enter your ${currency} rate above`
                       : 'Waiting for exchange rate'}
                   </Text>
                 </View>
               </View>
-              <View style={s.refreshRow}>
-                <View style={s.flex}>
-                  <Text style={s.rateStatus}>
-                    {loading
-                      ? 'Refreshing rates…'
-                      : cached && rate
-                      ? 'Saved rate · refresh unavailable'
-                      : rate
-                      ? 'Daily reference rate'
-                      : 'Rate unavailable'}
-                  </Text>
-                  {rate && <Text style={s.date}>Rate date: {date}</Text>}
+              {rateMode === 'market' && (
+                <View style={s.refreshRow}>
+                  <View style={s.flex}>
+                    <Text style={s.rateStatus}>
+                      {loading
+                        ? 'Refreshing rates…'
+                        : cached && rate
+                        ? 'Saved rate · refresh unavailable'
+                        : rate
+                        ? 'Daily reference rate'
+                        : 'Rate unavailable'}
+                    </Text>
+                    {rate && <Text style={s.date}>Rate date: {date}</Text>}
+                  </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Refresh exchange rates"
+                    accessibilityState={{ disabled: loading }}
+                    disabled={loading}
+                    onPress={refresh}
+                    style={s.refresh}
+                  >
+                    {loading ? (
+                      <ActivityIndicator color="#1b5750" size="small" />
+                    ) : (
+                      <Text style={s.refreshText}>↻ Refresh</Text>
+                    )}
+                  </Pressable>
                 </View>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Refresh exchange rates"
-                  accessibilityState={{ disabled: loading }}
-                  disabled={loading}
-                  onPress={refresh}
-                  style={s.refresh}
-                >
-                  {loading ? (
-                    <ActivityIndicator color="#1b5750" size="small" />
-                  ) : (
-                    <Text style={s.refreshText}>↻ Refresh</Text>
-                  )}
-                </Pressable>
-              </View>
-              {!!error && (
+              )}
+              {rateMode === 'paypal' && (
+                <Text style={s.helper}>
+                  {manualRates[currency]?.updatedAt
+                    ? `Rate entered: ${new Date(
+                        manualRates[currency]!.updatedAt!,
+                      ).toLocaleDateString('en-IN')}`
+                    : 'Your entered rates are used until you change them.'}
+                </Text>
+              )}
+              {!!error && rateMode === 'market' && (
                 <Text accessibilityRole="alert" style={s.error}>
                   {error}
                   {rate
@@ -288,7 +505,9 @@ export default function App() {
                   key={code}
                   accessibilityRole="button"
                   accessibilityLabel={`Select ${code}, rate ${
-                    rates[code] ? formatINR(rates[code]!.rate) : 'unavailable'
+                    (rateMode === 'paypal'
+                      ? manualRates[code]?.rate
+                      : rates[code]?.rate) ?? 'unavailable'
                   }`}
                   onPress={() => setCurrency(code)}
                   style={s.marketCard}
@@ -297,7 +516,17 @@ export default function App() {
                     {details[code].flag} {code}
                   </Text>
                   <Text style={s.marketValue}>
-                    {rates[code] ? formatINR(rates[code]!.rate) : '₹ —'}
+                    {(
+                      rateMode === 'paypal'
+                        ? manualRates[code]?.rate
+                        : rates[code]?.rate
+                    )
+                      ? formatINR(
+                          (rateMode === 'paypal'
+                            ? manualRates[code]?.rate
+                            : rates[code]?.rate)!,
+                        )
+                      : 'Set rate'}
                   </Text>
                   <Text style={s.marketName}>{details[code].name}</Text>
                 </Pressable>
@@ -306,8 +535,9 @@ export default function App() {
             <View style={s.note}>
               <Text style={s.noteIcon}>ⓘ</Text>
               <Text style={s.noteText}>
-                Rates from Frankfurter, updated daily. These are reference
-                estimates; bank rates and fees may differ.
+                {rateMode === 'paypal'
+                  ? 'PayPal mode uses rates entered by you. Check the rate in PayPal before a transaction; actual fees and conversion may differ.'
+                  : 'Market rates from Frankfurter, updated daily. These reference estimates may differ from PayPal rates.'}
               </Text>
             </View>
             <Text style={s.footer}>LESS GUESSWORK. MORE CLARITY.</Text>
@@ -319,6 +549,54 @@ export default function App() {
 }
 
 const s = StyleSheet.create({
+  modeRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  modeButton: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 10,
+    backgroundColor: '#f0f3f4',
+  },
+  modeSelected: {
+    backgroundColor: '#d9f6e9',
+    borderWidth: 1,
+    borderColor: '#9dd5bb',
+  },
+  modeText: { fontSize: 12, fontWeight: '600', color: '#285b4e' },
+  rateEditor: {
+    backgroundColor: '#f5f8f7',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 18,
+  },
+  editorRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  rateInput: {
+    flex: 1,
+    fontSize: 22,
+    color: '#172f39',
+    paddingVertical: 8,
+    minWidth: 0,
+  },
+  helper: { fontSize: 11, color: '#667980', lineHeight: 17, marginTop: 8 },
+  additionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 12,
+  },
+  addButton: {
+    flex: 1,
+    backgroundColor: '#173e37',
+    borderRadius: 10,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  addText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  clearButton: { paddingHorizontal: 12, paddingVertical: 13 },
+  clearText: { color: '#667980', fontSize: 12 },
+  disabled: { opacity: 0.45 },
+  total: { marginTop: 10, fontSize: 13, fontWeight: '600', color: '#285b4e' },
+  expressionInput: { fontSize: 22 },
   flex: { flex: 1 },
   safe: { flex: 1, backgroundColor: '#101f2d' },
   page: {
@@ -530,7 +808,7 @@ const s = StyleSheet.create({
   marketCurrency: { color: '#b9ccd7', fontSize: 12, fontWeight: '600' },
   marketValue: {
     color: '#eef7f6',
-    fontSize: 23,
+    fontSize: 18,
     fontWeight: '700',
     marginTop: 13,
   },

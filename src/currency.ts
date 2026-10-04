@@ -1,11 +1,20 @@
-export type Currency = 'USD' | 'EUR';
+export type Currency = 'USD' | 'EUR' | 'GBP';
 export type Rate = { base: Currency; quote: 'INR'; date: string; rate: number };
 
 export function parseAmount(value: string): number | null {
-  if (!/^\d*(\.\d{0,2})?$/.test(value) || value === '' || value === '.')
-    return null;
-  const amount = Number(value);
-  return Number.isFinite(amount) && amount <= 1_000_000_000 ? amount : null;
+  const terms = value.split('+');
+  if (terms.length > 50) return null;
+  let cents = 0;
+  for (const term of terms) {
+    const clean = term.trim();
+    if (!/^\d*(\.\d{0,2})?$/.test(clean) || clean === '' || clean === '.')
+      return null;
+    const number = Number(clean);
+    if (!Number.isFinite(number) || number > 1_000_000_000) return null;
+    cents += Math.round(number * 100);
+    if (cents > 100_000_000_000) return null;
+  }
+  return cents / 100;
 }
 
 export function validateRate(data: unknown, base: Currency): Rate {
