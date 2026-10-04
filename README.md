@@ -1,60 +1,75 @@
 # Currency Converter
 
-## Build an installable Android APK
+A standard **React Native Community CLI** app using React Native 0.86.3 and TypeScript. No Expo, EAS, or Expo sign-in is used.
 
-The `preview` profile in `eas.json` produces a standalone APK.
+Converts **USD → INR** and **EUR → INR** with a navy-and-mint UI, currency tabs, quick amounts, Indian number formatting, dated reference rates, manual refresh, and saved-rate fallback when offline.
+
+## Get your APK from GitHub
+
+1. Open [Actions → Build Android APK](https://github.com/Jeevankumar-s/currency-converter/actions/workflows/checks.yml).
+2. A build starts automatically on each push to `main`. You can also click **Run workflow**, choose `main`, and run it.
+3. Open the completed green run. Under **Artifacts**, download **currency-converter-apk**.
+4. Extract the ZIP, copy **currency-converter.apk** to your Android phone, and open it to install. Enable installation from that source if Android asks.
+
+GitHub builds the native Android project with Gradle. No Expo account, Android Studio on your computer, or repository secrets are needed for this test APK. This artifact includes the JavaScript bundle and runs without a development server. The workflow targets ARM64 and ARMv7 Android phones (Android 7.0 or later).
+
+The APK uses React Native's standard public debug signing key for personal testing. To publish to Google Play, configure your own private release signing key and build an AAB; do not commit private signing credentials.
+
+## Build an APK on your computer
+
+Install Node.js 24, JDK 17, and Android Studio. In SDK Manager, install Android SDK Platform 36, Build Tools 36.0.0, NDK 27.1.12297006, and CMake 3.22.1. Configure `ANDROID_HOME` to your Android SDK location or set `sdk.dir` in `android/local.properties` (this file is ignored by git).
 
 ```sh
+git clone https://github.com/Jeevankumar-s/currency-converter.git
+cd currency-converter
 npm ci
-npx eas-cli@latest login
-npx eas-cli@latest build --platform android --profile preview
 ```
 
-On first run, allow EAS to create/link the Expo project and generate an Android signing keystore. Save access to that keystore for future updates. Download the APK from the build URL when the cloud build completes.
+On Windows:
 
-A React Native app built with Expo and TypeScript for **USD → INR** and **EUR → INR**.
+```bat
+cd android
+gradlew.bat assembleRelease
+```
 
-## Features
-
-- Navy and mint interface, custom rupee icon, currency tabs, and quick amount buttons.
-- Instant conversion with Indian number formatting.
-- Daily exchange rates from the public [Frankfurter v2 API](https://frankfurter.dev/), without an API key.
-- Rate date, manual refresh, loading/error states, and saved rates for offline use.
-- Amount validation (0–1 billion, up to two decimal places).
-- Accessible controls and a scrollable layout for smaller screens.
-
-## Run
-
-Use Node.js 24 and npm.
+On macOS/Linux:
 
 ```sh
-npm ci
+cd android
+./gradlew assembleRelease
+```
+
+Your APK will be at **android/app/build/outputs/apk/release/app-release.apk**.
+
+## Development
+
+```sh
 npm start
+# In a second terminal, with an emulator or USB-connected phone:
+npm run android
 ```
 
-Scan the QR code with a compatible Expo Go version on Android or iOS. If Expo Go does not yet support SDK 57, use an Expo development build instead.
+The iOS native project is also included. It requires macOS, Xcode, and CocoaPods:
 
 ```sh
-npm run android   # Android emulator/device
-npm run ios       # iOS simulator on macOS
-npm run web       # Browser
+bundle install
+cd ios
+bundle exec pod install
+cd ..
+npm run ios
 ```
 
-The project uses Expo SDK 57 / React Native 0.86. Native projects can be generated with `npx expo prebuild`. Android and iOS signing credentials are needed for store releases and are not included.
-
-## Checks
+## Validation
 
 ```sh
+npm run lint
 npm run typecheck
 npm test
-npx expo install --check
-npx expo export --platform all
+npm run bundle:android
 ```
 
-GitHub Actions runs the same checks on pushes and pull requests.
+## Exchange rates
 
-## Rate behavior
+Rates come from the public [Frankfurter v2 API](https://frankfurter.dev/) without an API key. Both pairs load at launch and on refresh. Requests time out after 12 seconds. Successful rates are saved locally; if refresh fails, saved rates are shown with their date. Amounts from zero to 1 billion with up to two decimal places are accepted.
 
-Both currency rates are fetched at launch and when Refresh is pressed. Successful responses are saved locally; if a later refresh fails, the app displays the saved rate with its original date. No invented fallback rates are used. Requests time out after 12 seconds. Conversion is amount × rate and is rounded for display to two decimal places.
-
-Frankfurter supplies daily reference rates, not real-time executable prices. Banks and payment providers may apply different rates and fees. Internet access is required to load fresh rates.
+These are daily reference estimates. Bank rates and fees may differ. Internet access is required for fresh rates.
